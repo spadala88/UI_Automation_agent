@@ -1,0 +1,10 @@
+# UI Automation and Interaction
+pyautogui
+# Computer Vision and OCR
+easyocr
+opencv-python
+# Image Processing
+Pillow
+# HTTP client
+requests
+
