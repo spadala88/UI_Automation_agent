@@ -7,6 +7,7 @@ import sys
 import traceback
 from PIL import Image
 from llm_ollama import call_llm
+from langchain_core.messages import HumanMessage, ToolMessage
 
 # ==========================================
 # 1. DEFINE AGENT TOOLS
@@ -75,46 +76,65 @@ def wait_for_ui(seconds: int) -> str:
 available_tools = [install_apk_from_parent, start_test_activity, click_ui_text, wait_for_ui]
 
 def run_agentic_flow():
-    # Note: For LangChain ChatOllama, the input usually needs to be a string 
-    # or a list of BaseMessages. We will use a string for the initial call.
-    prompt = """
+    # 1. Define the objective
+    objective = """
     Execute these steps:
     1. Install the APK from the parent folder.
     2. Wait 3 seconds.
     3. Start the activity 'com.example.navuiact/com.example.navuiact.MainActivity' via ADB.
     4. Wait 5 seconds.
-    5. Click 'Home', then 'Favorites', then 'Profile'.
+    5. Click 'Favorites'.
     """
 
-    print("🚀 Starting Agentic Flow (LangChain/Ollama Mode)...\n")
+    print("🚀 Starting Agentic Loop...\n")
 
-    try:
-        # LangChain's invoke returns an AIMessage object
-        response = call_llm(prompt, tools=available_tools)
-        
-        # In LangChain, tool calls are stored in .tool_calls
-        if hasattr(response, 'tool_calls') and response.tool_calls:
-            for tool_call in response.tool_calls:
-                func_name = tool_call['name']
-                args = tool_call['args']
-                
-                print(f"🔧 Agent calling tool: {func_name}")
-                
-                func_map = {f.__name__: f for f in available_tools}
-                if func_name in func_map:
-                    result = func_map[func_name](**args)
-                    print(f"📊 Result: {result}")
-                
-            # After tool execution, the agent usually needs to be called again 
-            # with the tool output to finalize. For this simple flow, 
-            # we execute the sequence provided by the model.
-        else:
-            print("🤖 Agent Response:", response.content)
+    # 2. Maintain message history
+    messages = [HumanMessage(content=objective)]
 
-    except Exception as e:
-        print(f"❌ Critical Error: {e}")
-        traceback.print_exc()
+    while True:
+        try:
+            # 3. Call the LLM with current history
+            response = call_llm(messages, tools=available_tools)
+            
+            # Add the AI's reasoning/decision to history
+            messages.append(response)
+
+            # 4. Check if the LLM wants to use tools
+            if response.tool_calls:
+                for tool_call in response.tool_calls:
+                    func_name = tool_call['name']
+                    args = tool_call['args']
+                    
+                    print(f"🔧 Agent is invoking: {func_name}")
+                    
+                    func_map = {f.__name__: f for f in available_tools}
+                    if func_name in func_map:
+                        # Execute the tool
+                        result = func_map[func_name](**args)
+                        print(f"📊 Result: {result}")
+                        
+                        # 5. FEEDBACK: Tell the LLM what happened
+                        # This is the "Observation" that triggers the next step
+                        messages.append(ToolMessage(
+                            tool_call_id=tool_call['id'],
+                            content=str(result)
+                        ))
+                    else:
+                        print(f"❌ Tool {func_name} not found.")
+                
+                # Go back to the top of the loop so the LLM can process the result
+                continue 
+            
+            else:
+                # No more tool calls means the agent is finished
+                print("\n✅ Final Agent Summary:", response.content)
+                break
+
+        except Exception as e:
+            print(f"❌ Error in loop: {e}")
+            break
 
 if __name__ == "__main__":
     run_agentic_flow()
     input("\nExecution finished. Press Enter to close...")
+    
