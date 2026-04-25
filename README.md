@@ -202,7 +202,9 @@ Modify the `objective` string in `run_agentic_flow()` to define custom automatio
 - The agent loop includes safety checks to prevent infinite loops
 
 ## Video
-<img width="800" height="473" alt="ui_agent_automation-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/9dd1a676-2c8e-4c6d-867c-1514eb970eec" />
+https://github.com/user-attachments/assets/6dc11162-380d-46ee-be96-85f68eddf3d6
+
+
 
 ## License
 
