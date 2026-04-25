@@ -5,7 +5,13 @@ An intelligent Android UI automation framework that combines computer vision (OC
 **Key Features:**
 - 🤖 AI-powered agent using Ollama with tool-calling capabilities
 - 🔍 Text-based UI element detection using EasyOCR
-- ⚙️ ADB integration for Android device interaction
+- ⚙️ ADB integration for Android device interaction<img width="800" height="473" alt="ui_agent_automation-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/9dd1a676-2c8e-4c6d-867c-1514eb970eec" />
+<img width="800" height="473" alt="ui_agent_automation-ezgif com-video-to-gif-converter" src="https://github.com/user-attachments/assets/45e175de-c32e-4fe0-948e-ff47d16086fb" />
+
+
+
+
+
 - 🖱️ Automated UI element clicking and navigation
 - 📸 Real-time screenshot analysis and OCR
 - 🔄 Flexible scripted and agentic automation approaches
