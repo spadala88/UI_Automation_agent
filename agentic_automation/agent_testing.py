@@ -5,6 +5,8 @@ import easyocr
 import os
 import sys
 import traceback
+import inspect
+import base64
 from PIL import Image
 from llm_ollama import call_llm
 from langchain_core.messages import HumanMessage, ToolMessage
@@ -12,6 +14,21 @@ from langchain_core.messages import HumanMessage, ToolMessage
 # ==========================================
 # 1. DEFINE AGENT TOOLS
 # ==========================================
+
+# The title of the window to constrain automation to. Set to None for full screen.
+TARGET_WINDOW_TITLE = "Android Emulator - Medium_phone:5554"
+
+# The resolution the agent inherently uses for coordinates. Set to None if no scaling is needed.
+AGENT_BASE_RESOLUTION = (1000, 1000)
+
+def get_target_window_region():
+    if not TARGET_WINDOW_TITLE:
+        return None
+    windows = pyautogui.getWindowsWithTitle(TARGET_WINDOW_TITLE)
+    if windows:
+        win = windows[0]
+        return win.left, win.top, win.width, win.height
+    return None
 
 def install_apk_from_parent() -> str:
     """Finds the first .apk file in the parent directory and installs it via ADB."""
@@ -43,7 +60,11 @@ def click_ui_text(target_text: str) -> str:
     time.sleep(2) 
     
     screenshot_path = "agent_debug_snap.png"
-    pyautogui.screenshot(screenshot_path)
+    region = get_target_window_region()
+    if region:
+        pyautogui.screenshot(screenshot_path, region=region)
+    else:
+        pyautogui.screenshot(screenshot_path)
     
     with Image.open(screenshot_path) as img:
         if img.convert("L").getextrema() == (0, 0):
@@ -56,6 +77,11 @@ def click_ui_text(target_text: str) -> str:
         if target_text.lower() in text.lower():
             center_x = int((bbox[0][0] + bbox[2][0]) / 2)
             center_y = int((bbox[0][1] + bbox[2][1]) / 2)
+            
+            if region:
+                center_x += region[0]
+                center_y += region[1]
+                
             pyautogui.moveTo(center_x, center_y, duration=0.5)
             pyautogui.click()
             return f"Successfully clicked '{target_text}'."
@@ -68,28 +94,186 @@ def wait_for_ui(seconds: int) -> str:
     time.sleep(seconds)
     return "Wait complete."
 
+def swipe_screen(start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.5) -> str:
+    """Clicks and drags from the start coordinates to the end coordinates to simulate a swipe or scroll. Default duration is 0.5s for a moderate scroll. Decrease to 0.1 for a fast flick, or increase to 1.0+ for a slow drag."""
+    print(f" AGENT ACTION: Swiping from ({start_x}, {start_y}) to ({end_x}, {end_y})...")
+    region = get_target_window_region()
+    if region:
+        # Dynamically adjust orientation of base resolution to match the window
+        if AGENT_BASE_RESOLUTION:
+            base_x, base_y = AGENT_BASE_RESOLUTION
+            if (region[2] > region[3]) != (base_x > base_y):
+                base_x, base_y = base_y, base_x
+
+            # Scale the coordinates based on the agent's base resolution
+            start_x = int((start_x / base_x) * region[2])
+            start_y = int((start_y / base_y) * region[3])
+            end_x = int((end_x / base_x) * region[2])
+            end_y = int((end_y / base_y) * region[3])
+            
+        # Clamp to region bounds, with 15px padding to avoid window resize handles
+        start_x = max(15, min(start_x, region[2] - 15))
+        start_y = max(15, min(start_y, region[3] - 15))
+        end_x = max(15, min(end_x, region[2] - 15))
+        end_y = max(15, min(end_y, region[3] - 15))
+        
+        start_x += region[0]
+        start_y += region[1]
+        end_x += region[0]
+        end_y += region[1]
+        
+    screen_w, screen_h = pyautogui.size()
+    start_x = max(10, min(start_x, screen_w - 10))
+    start_y = max(10, min(start_y, screen_h - 10))
+    end_x = max(10, min(end_x, screen_w - 10))
+    end_y = max(10, min(end_y, screen_h - 10))
+    
+    pyautogui.moveTo(start_x, start_y)
+    pyautogui.mouseDown(button='left')
+    pyautogui.moveTo(end_x, end_y, duration=duration)
+    pyautogui.mouseUp(button='left')
+    return f"Successfully swiped from ({start_x}, {start_y}) to ({end_x}, {end_y}) with duration {duration}s."
+
+def click_icon_by_coordinate(x: int, y: int, template_name: str) -> str:
+    """Clicks the specified x,y coordinate, and saves a cropped image around it for future OpenCV matching. Use only if click_ui_text (easyocr) cannot find the target."""
+    print(f" AGENT ACTION: Clicking coordinate ({x}, {y}) and saving template '{template_name}'...")
+    
+    # Save crop
+    screenshot_path = "agent_debug_snap.png"
+    region = get_target_window_region()
+    if region:
+        pyautogui.screenshot(screenshot_path, region=region)
+        
+        # Dynamically adjust orientation of base resolution to match the window
+        if AGENT_BASE_RESOLUTION:
+            base_x, base_y = AGENT_BASE_RESOLUTION
+            if (region[2] > region[3]) != (base_x > base_y):
+                base_x, base_y = base_y, base_x
+                
+            x = int((x / base_x) * region[2])
+            y = int((y / base_y) * region[3])
+        x = max(15, min(x, region[2] - 15))
+        y = max(15, min(y, region[3] - 15))
+    else:
+        pyautogui.screenshot(screenshot_path)
+        screen_w, screen_h = pyautogui.size()
+        x = max(15, min(x, screen_w - 15))
+        y = max(15, min(y, screen_h - 15))
+        
+    with Image.open(screenshot_path) as img:
+        box = (max(0, x-30), max(0, y-30), min(img.width, x+30), min(img.height, y+30))
+        crop = img.crop(box)
+        crop.save(f"template_{template_name}.png")
+    
+    # Click
+    click_x = x + region[0] if region else x
+    click_y = y + region[1] if region else y
+    
+    screen_w, screen_h = pyautogui.size()
+    click_x = max(10, min(click_x, screen_w - 10))
+    click_y = max(10, min(click_y, screen_h - 10))
+    
+    pyautogui.moveTo(click_x, click_y, duration=0.5)
+    pyautogui.click()
+    return f"Successfully clicked ({x}, {y}) and saved template."
+
+def click_by_template(template_path: str) -> str:
+    """Uses OpenCV to find and click an image template on the screen. (Used by standalone script)"""
+    print(f" AGENT ACTION: Searching for image template '{template_path}'...")
+    time.sleep(2)
+    region = get_target_window_region()
+    if region:
+        location = pyautogui.locateCenterOnScreen(template_path, confidence=0.8, region=region)
+    else:
+        location = pyautogui.locateCenterOnScreen(template_path, confidence=0.8)
+        
+    if location:
+        pyautogui.moveTo(location.x, location.y, duration=0.5)
+        pyautogui.click()
+        return f"Successfully clicked template '{template_path}'."
+    return f"Failed to find template '{template_path}' on screen."
+
 # ==========================================
 # 2. AGENT CONFIGURATION & LOOP
 # ==========================================
 
 # Map functions to a format LangChain understands
-available_tools = [install_apk_from_parent, start_test_activity, click_ui_text, wait_for_ui]
+_executed_steps = []
+
+def generate_standalone_script(filename: str = "standalone_automation.py") -> str:
+    """Generates a standalone python script that replicates the successful steps taken so far."""
+    print(f"\n📝 Generating standalone script: {filename}")
+    steps = _executed_steps
+    if not steps:
+        return "Error: No successful steps to generate a script from."
+        
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write("import time\nimport subprocess\nimport pyautogui\nimport easyocr\nimport os\nfrom PIL import Image\n\n")
+            f.write(f"TARGET_WINDOW_TITLE = {repr(TARGET_WINDOW_TITLE)}\n")
+            f.write(f"AGENT_BASE_RESOLUTION = {repr(AGENT_BASE_RESOLUTION)}\n\n")
+            f.write(inspect.getsource(get_target_window_region) + "\n\n")
+            
+            # Add the tool definitions (so it is truly standalone)
+            used_funcs = []
+            for step in steps:
+                if step['func_name'] not in used_funcs and step['func_name'] != 'generate_standalone_script':
+                    used_funcs.append(step['func_name'])
+                    
+            standalone_tools = available_tools + [click_by_template]
+            func_map = {func.__name__: func for func in standalone_tools}
+            
+            for func_name in used_funcs:
+                if func_name in func_map:
+                    source = inspect.getsource(func_map[func_name])
+                    f.write(source + "\n\n")
+                    
+            f.write("if __name__ == '__main__':\n")
+            f.write("    print('🚀 Starting standalone automation...')\n")
+            for step in steps:
+                func_name = step['func_name']
+                if func_name == 'generate_standalone_script':
+                    continue
+                args = step['args']
+                args_str = ", ".join([f"{k}={repr(v)}" for k, v in args.items()])
+                f.write(f"    print(\"Executing: {func_name}({args_str})\")\n")
+                f.write(f"    {func_name}({args_str})\n")
+            f.write("    print('✅ Automation finished.')\n")
+        return f"Successfully generated standalone script at {filename}"
+    except Exception as e:
+        return f"Error generating script: {str(e)}"
+
+def validate_screen(query: str) -> str:
+    """Takes a screenshot and sends it to the LLM for visual validation based on the query. Use sparingly due to cost."""
+    print(" AGENT ACTION: Taking screenshot for visual validation...")
+    screenshot_path = "validation_snap.png"
+    region = get_target_window_region()
+    if region:
+        pyautogui.screenshot(screenshot_path, region=region)
+    else:
+        pyautogui.screenshot(screenshot_path)
+    return f"__IMAGE_VALIDATION_REQUESTED__:{query}"
+
+available_tools = [install_apk_from_parent, start_test_activity, click_ui_text, wait_for_ui, generate_standalone_script, validate_screen, click_icon_by_coordinate, swipe_screen]
 
 def run_agentic_flow():
     # 1. Define the objective
     objective = """
     Execute these steps:
-    1. Install the APK from the parent folder.
-    2. Wait 3 seconds.
-    3. Start the activity 'com.example.navuiact/com.example.navuiact.MainActivity' via ADB.
-    4. Wait 5 seconds.
-    5. Click 'Favorites'.
+    1. Make sure you are in the home screen.
+    2. Open the app drawer.
+    3. open settings.
+    4. Scroll until you find the accessibility settings.
+    5. click on "Accessibility".
     """
 
     print("🚀 Starting Agentic Loop...\n")
 
     # 2. Maintain message history
     messages = [HumanMessage(content=objective)]
+    
+    global _executed_steps
+    _executed_steps.clear()
 
     while True:
         try:
@@ -113,12 +297,45 @@ def run_agentic_flow():
                         result = func_map[func_name](**args)
                         print(f"📊 Result: {result}")
                         
-                        # 5. FEEDBACK: Tell the LLM what happened
-                        # This is the "Observation" that triggers the next step
-                        messages.append(ToolMessage(
-                            tool_call_id=tool_call['id'],
-                            content=str(result)
-                        ))
+                        if isinstance(result, str) and result.startswith("__IMAGE_VALIDATION_REQUESTED__"):
+                            query = result.split(":", 1)[1] if ":" in result else "Please review the screen."
+                            
+                            with Image.open("validation_snap.png") as img:
+                                img_w, img_h = img.size
+                                
+                            with open("validation_snap.png", "rb") as img_file:
+                                b64_img = base64.b64encode(img_file.read()).decode("utf-8")
+                            
+                            # 5. FEEDBACK: Tell the LLM what happened
+                            messages.append(ToolMessage(
+                                tool_call_id=tool_call['id'],
+                                content="Screenshot taken successfully. Please see the image in the next human message."
+                            ))
+                            
+                            # Inject image as human message
+                            messages.append(HumanMessage(
+                                content=[
+                                    {"type": "text", "text": f"Here is the requested screenshot for validation. The image size is {img_w}x{img_h} pixels. Provide coordinates relative to this size. Query: {query}"},
+                                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_img}"}}
+                                ]
+                            ))
+                        else:
+                            # Record successful step
+                            if "Failed" not in str(result) and "Error" not in str(result):
+                                if func_name == "click_icon_by_coordinate":
+                                    _executed_steps.append({
+                                        "func_name": "click_by_template", 
+                                        "args": {"template_path": f"template_{args['template_name']}.png"}
+                                    })
+                                else:
+                                    _executed_steps.append({"func_name": func_name, "args": args})
+                            
+                            # 5. FEEDBACK: Tell the LLM what happened
+                            # This is the "Observation" that triggers the next step
+                            messages.append(ToolMessage(
+                                tool_call_id=tool_call['id'],
+                                content=str(result)
+                            ))
                     else:
                         print(f"❌ Tool {func_name} not found.")
                 
