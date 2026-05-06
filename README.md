@@ -113,8 +113,10 @@ python agentic_automation/agent_testing.py
 **Available Agent Tools:**
 - `install_apk_from_parent()`: Finds and installs the first APK in the parent directory
 - `start_test_activity()`: Launches the NavUiAct application via ADB
-- `click_ui_text(target_text)`: Finds text on screen using OCR and clicks it
+- `click_ui_text(target_text)`: Finds text on screen using local EasyOCR and clicks it (Agent does NOT see the screen)
 - `wait_for_ui(seconds)`: Pauses execution for app loading
+- `swipe_screen(start_x, start_y, end_x, end_y, duration)`: Executes an adjustable screen swipe
+- `validate_screen(query)`: Takes a screenshot and injects it into the chat history so the Vision LLM can actually see it. **Note:** By default, the agent operates "blind" using local tools like OCR to save costs. You must explicitly instruct the agent in the `objective` prompt to use `validate_screen` if you want it to visually analyze the UI.
 
 **Customization:**
 - Edit the `objective` variable in `run_agentic_flow()` to change the automation workflow
@@ -173,6 +175,19 @@ bash static_automation/testing.sh
 | Permission denied (testing.sh) | Make file executable: `chmod +x static_automation/testing.sh` |
 
 ## Configuration
+
+### Agent Window & Coordinate Settings (`agentic_automation/agent_testing.py`)
+```python
+# Set this to the exact title of the application window you want to target (e.g. "Android Emulator"). 
+# Set to None to scan the entire screen.
+TARGET_WINDOW_TITLE = "Android Emulator - Medium_phone:5554"
+
+# Set this to the coordinate system scale the agent naturally assumes. 
+# For example, if the agent outputs coordinates for a standard 1000x1000 Qwen-VL grid, 
+# but your window is smaller, this scales the coordinates proportionally.
+# Set to None if no scaling is needed.
+AGENT_BASE_RESOLUTION = (1000, 1000)
+```
 
 ### LLM Settings (`agentic_automation/llm_ollama.py`)
 ```python

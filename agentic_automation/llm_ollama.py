@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 from langchain_ollama import ChatOllama
 
 # Default model configuration
-DEFAULT_MODEL = "gpt-oss:120b-cloud"
+DEFAULT_MODEL = "qwen3-vl:235b-cloud"
 OLLAMA_BASE_URL = "http://localhost:11434"
 
 # Initialize with default model
