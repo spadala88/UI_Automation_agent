@@ -1,6 +1,8 @@
 # UI Automation Agent
 
 An intelligent Android UI automation framework that combines computer vision (OCR) with AI-powered agents. This project provides both a traditional scripted approach and an advanced LLM-based agent approach for automating Android app testing and interaction.
+## Video
+https://github.com/user-attachments/assets/6dc11162-380d-46ee-be96-85f68eddf3d6
 
 **Key Features:**
 - 🤖 AI-powered agent using Ollama with tool-calling capabilities
@@ -216,8 +218,7 @@ Modify the `objective` string in `run_agentic_flow()` to define custom automatio
 - For best results with OCR, ensure the Android emulator/device has good display quality
 - The agent loop includes safety checks to prevent infinite loops
 
-## Video
-https://github.com/user-attachments/assets/6dc11162-380d-46ee-be96-85f68eddf3d6
+
 
 
 
