@@ -1,6 +1,5 @@
 import time
 import subprocess
-import pyautogui
 import easyocr
 import os
 import sys
@@ -10,6 +9,20 @@ import base64
 from PIL import Image
 from llm_ollama import call_llm
 from langchain_core.messages import HumanMessage, ToolMessage
+
+# Add Android SDK platform-tools to PATH
+sdk_platform_tools = "/home/carlos/Android/Sdk/platform-tools"
+if sdk_platform_tools not in os.environ["PATH"]:
+    os.environ["PATH"] = os.environ["PATH"] + os.pathsep + sdk_platform_tools
+
+try:
+    import pyautogui
+    pyautogui_import_error = None
+except Exception as e:
+    pyautogui = None
+    pyautogui_import_error = e
+
+
 
 # ==========================================
 # 1. DEFINE AGENT TOOLS
@@ -24,13 +37,114 @@ AGENT_BASE_RESOLUTION = (1000, 1000)
 def get_target_window_region():
     if not TARGET_WINDOW_TITLE:
         return None
-    windows = pyautogui.getWindowsWithTitle(TARGET_WINDOW_TITLE)
-    if windows:
-        win = windows[0]
-        return win.left, win.top, win.width, win.height
+    try:
+        if pyautogui is None:
+            return None
+        windows = pyautogui.getWindowsWithTitle(TARGET_WINDOW_TITLE)
+        if windows:
+            win = windows[0]
+            return win.left, win.top, win.width, win.height
+    except Exception:
+        pass
     return None
 
-def install_apk_from_parent() -> str:
+def host_size():
+    """Returns the screen resolution (width, height) of the host machine."""
+    try:
+        if pyautogui is None:
+            raise RuntimeError("PyAutoGUI is not initialized")
+        return pyautogui.size()
+    except Exception:
+        try:
+            import pyscreenshot
+        # Use ADB to get screen dimensions
+        result = subprocess.run(["adb", "shell", "wm", "size"], capture_output=True, text=True)
+        if result.returncode == 0:
+            res_str = result.stdout.strip().split()[-1]
+            w, h = map(int, res_str.split('x'))
+            return (w, h)
+    except Exception:
+        pass
+    return (1000, 1000)
+
+
+def host_screenshot(screenshot_path: str, region=None, ignore_left_edge: bool = False) -> int:
+    """Captures a screenshot of the host screen using pyscreenshot.
+    Returns the X offset cropped from the left edge (if any).
+    """
+    crop_x = 0
+    try:
+        import pyscreenshot
+        print(f" -> Using pyscreenshot for capture.")
+        if region:
+            x, y, w, h = region
+            bbox = (x, y, x + w, y + h)
+            img = pyscreenshot.grab(bbox=bbox)
+        else:
+            img = pyscreenshot.grab()
+            if ignore_left_edge:
+                w, h = img.size
+                crop_x = int(w * 0.10)
+                img = img.crop((crop_x, 0, w, h))
+        img.save(screenshot_path)
+    except Exception as e:
+        print(f" -> pyscreenshot failed: {e}")
+    return crop_x
+
+def host_click(x: int, y: int):
+    """Simulates a mouse click on the host machine."""
+    import sys
+    if sys.platform.startswith("linux"):
+        ydotool_x = int(x * 0.75)
+        ydotool_y = int(y * 0.75)
+        print(f" -> Using ydotool for Linux click mapped to ydotoold ({ydotool_x}, {ydotool_y})")
+        
+        subprocess.run(["ydotool", "mousemove", "-a", "-x", str(ydotool_x), "-y", str(ydotool_y)], check=False)
+        time.sleep(0.2)
+        subprocess.run(["ydotool", "key", "272:1"], check=False)
+        time.sleep(0.1)
+        subprocess.run(["ydotool", "key", "272:0"], check=False)
+    else:
+        import pyautogui
+        print(f" -> Using PyAutoGUI for {sys.platform} click at ({x}, {y})")
+        pyautogui.moveTo(x, y, duration=0.2)
+        pyautogui.click()
+
+def host_swipe(start_x: int, start_y: int, end_x: int, end_y: int, duration: float = 0.5):
+    """Simulates a drag/swipe gesture on the host machine."""
+    import sys
+    if sys.platform.startswith("linux"):
+        ydotool_start_x = int(start_x * 0.75)
+        ydotool_start_y = int(start_y * 0.75)
+        ydotool_end_x = int(end_x * 0.75)
+        ydotool_end_y = int(end_y * 0.75)
+        
+        print(f" -> Using ydotool for Linux swipe from ({ydotool_start_x}, {ydotool_start_y}) to ({ydotool_end_x}, {ydotool_end_y}) over {duration}s")
+        
+        subprocess.run(["ydotool", "mousemove", "-a", "-x", str(ydotool_start_x), "-y", str(ydotool_start_y)], check=False)
+        time.sleep(0.1)
+        subprocess.run(["ydotool", "key", "272:1"], check=False)
+        time.sleep(0.1)
+        
+        steps = 20
+        sleep_time = duration / steps
+        for i in range(1, steps + 1):
+            cur_x = ydotool_start_x + (ydotool_end_x - ydotool_start_x) * (i / steps)
+            cur_y = ydotool_start_y + (ydotool_end_y - ydotool_start_y) * (i / steps)
+            subprocess.run(["ydotool", "mousemove", "-a", "-x", str(int(cur_x)), "-y", str(int(cur_y))], check=False)
+            time.sleep(sleep_time)
+            
+        time.sleep(0.1)
+        subprocess.run(["ydotool", "key", "272:0"], check=False)
+    else:
+        import pyautogui
+        print(f" -> Using PyAutoGUI for {sys.platform} swipe from ({start_x}, {start_y}) to ({end_x}, {end_y}) over {duration}s")
+        pyautogui.moveTo(start_x, start_y)
+        pyautogui.dragTo(end_x, end_y, duration=duration, button='left')
+
+def get_target_window_region() -> Optional[Tuple[int, int, int, int]]:
+    """Returns None as we don't have a reliable way to get the window rect on Wayland."""
+    return None
     """Finds the first .apk file in the parent directory and installs it via ADB."""
     print(" AGENT ACTION: Locating and installing APK...")
     try:
@@ -56,16 +170,14 @@ def start_test_activity() -> str:
 
 def click_ui_text(target_text: str) -> str:
     """Takes a screenshot, uses EasyOCR to find specified text, and clicks it."""
-    print(f" AGENT ACTION: Searching for text '{target_text}'...")
+    print(f" AGENT ACTION: Searching for text...")
     time.sleep(2) 
     
     screenshot_path = "agent_debug_snap.png"
     region = get_target_window_region()
-    if region:
-        pyautogui.screenshot(screenshot_path, region=region)
-    else:
-        pyautogui.screenshot(screenshot_path)
-    
+    # If no specific region, ignore the left edge to avoid finding Ubuntu desktop icons
+    crop_offset_x = host_screenshot(screenshot_path, region=region, ignore_left_edge=(region is None))
+
     with Image.open(screenshot_path) as img:
         if img.convert("L").getextrema() == (0, 0):
             return "Error: Black screen detected. Disable hardware acceleration in your emulator."
@@ -73,20 +185,29 @@ def click_ui_text(target_text: str) -> str:
     reader = easyocr.Reader(['en'], gpu=False, verbose=False)
     results = reader.readtext(screenshot_path)
     
+    matches = []
     for (bbox, text, prob) in results:
+        # Exact match or inclusion check for the tab labels
         if target_text.lower() in text.lower():
-            center_x = int((bbox[0][0] + bbox[2][0]) / 2)
-            center_y = int((bbox[0][1] + bbox[2][1]) / 2)
+            matches.append(bbox)
             
-            if region:
-                center_x += region[0]
-                center_y += region[1]
-                
-            pyautogui.moveTo(center_x, center_y, duration=0.5)
-            pyautogui.click()
-            return f"Successfully clicked '{target_text}'."
-            
-    return f"Failed to find text '{target_text}' on screen."
+    if not matches:
+        return f"Failed to find text '{target_text}' on screen."
+        
+    # The Android bottom navigation tabs will be at the bottom of the screen.
+    # Sort matches by Y descending, then X descending to break ties in favor of the emulator
+    matches.sort(key=lambda b: (b[0][1], b[0][0]), reverse=True)
+    found_bbox = matches[0]
+    
+    center_x = int((found_bbox[0][0] + found_bbox[2][0]) / 2) + crop_offset_x
+    center_y = int((found_bbox[0][1] + found_bbox[2][1]) / 2)
+    
+    if region:
+        center_x += region[0]
+        center_y += region[1]
+        
+    host_click(center_x, center_y)
+    return f"Successfully clicked '{target_text}'."
 
 def wait_for_ui(seconds: int) -> str:
     """Pause execution to allow for app loading."""
@@ -122,16 +243,13 @@ def swipe_screen(start_x: int, start_y: int, end_x: int, end_y: int, duration: f
         end_x += region[0]
         end_y += region[1]
         
-    screen_w, screen_h = pyautogui.size()
+    screen_w, screen_h = host_size()
     start_x = max(10, min(start_x, screen_w - 10))
     start_y = max(10, min(start_y, screen_h - 10))
     end_x = max(10, min(end_x, screen_w - 10))
     end_y = max(10, min(end_y, screen_h - 10))
     
-    pyautogui.moveTo(start_x, start_y)
-    pyautogui.mouseDown(button='left')
-    pyautogui.moveTo(end_x, end_y, duration=duration)
-    pyautogui.mouseUp(button='left')
+    host_swipe(start_x, start_y, end_x, end_y, duration=duration)
     return f"Successfully swiped from ({start_x}, {start_y}) to ({end_x}, {end_y}) with duration {duration}s."
 
 def click_icon_by_coordinate(x: int, y: int, template_name: str) -> str:
@@ -142,7 +260,7 @@ def click_icon_by_coordinate(x: int, y: int, template_name: str) -> str:
     screenshot_path = "agent_debug_snap.png"
     region = get_target_window_region()
     if region:
-        pyautogui.screenshot(screenshot_path, region=region)
+        host_screenshot(screenshot_path, region=region)
         
         # Dynamically adjust orientation of base resolution to match the window
         if AGENT_BASE_RESOLUTION:
@@ -155,8 +273,8 @@ def click_icon_by_coordinate(x: int, y: int, template_name: str) -> str:
         x = max(15, min(x, region[2] - 15))
         y = max(15, min(y, region[3] - 15))
     else:
-        pyautogui.screenshot(screenshot_path)
-        screen_w, screen_h = pyautogui.size()
+        host_screenshot(screenshot_path)
+        screen_w, screen_h = host_size()
         x = max(15, min(x, screen_w - 15))
         y = max(15, min(y, screen_h - 15))
         
@@ -169,36 +287,54 @@ def click_icon_by_coordinate(x: int, y: int, template_name: str) -> str:
     click_x = x + region[0] if region else x
     click_y = y + region[1] if region else y
     
-    screen_w, screen_h = pyautogui.size()
+    screen_w, screen_h = host_size()
     click_x = max(10, min(click_x, screen_w - 10))
     click_y = max(10, min(click_y, screen_h - 10))
     
-    pyautogui.moveTo(click_x, click_y, duration=0.5)
-    pyautogui.click()
+    host_click(click_x, click_y)
     return f"Successfully clicked ({x}, {y}) and saved template."
 
 def click_by_template(template_path: str) -> str:
     """Uses OpenCV to find and click an image template on the screen. (Used by standalone script)"""
     print(f" AGENT ACTION: Searching for image template '{template_path}'...")
     time.sleep(2)
+    import cv2
+    import numpy as np
+    
+    screenshot_path = "agent_debug_snap.png"
     region = get_target_window_region()
-    if region:
-        location = pyautogui.locateCenterOnScreen(template_path, confidence=0.8, region=region)
-    else:
-        location = pyautogui.locateCenterOnScreen(template_path, confidence=0.8)
+    host_screenshot(screenshot_path, region=region)
+    
+    # Load screenshot and template
+    img_rgb = cv2.imread(screenshot_path)
+    template = cv2.imread(template_path)
+    if img_rgb is None:
+        return f"Failed to read screenshot {screenshot_path}"
+    if template is None:
+        return f"Failed to read template {template_path}"
         
-    if location:
-        pyautogui.moveTo(location.x, location.y, duration=0.5)
-        pyautogui.click()
+    h, w = template.shape[:2]
+    res = cv2.matchTemplate(img_rgb, template, cv2.TM_CCOEFF_NORMED)
+    min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+    
+    # Set threshold (0.8 confidence equivalent)
+    threshold = 0.8
+    if max_val >= threshold:
+        # Center of matched area
+        center_x = max_loc[0] + w // 2
+        center_y = max_loc[1] + h // 2
+        
+        if region:
+            center_x += region[0]
+            center_y += region[1]
+            
+        screen_w, screen_h = host_size()
+        click_x = max(10, min(center_x, screen_w - 10))
+        click_y = max(10, min(center_y, screen_h - 10))
+        
+        host_click(click_x, click_y)
         return f"Successfully clicked template '{template_path}'."
     return f"Failed to find template '{template_path}' on screen."
-
-# ==========================================
-# 2. AGENT CONFIGURATION & LOOP
-# ==========================================
-
-# Map functions to a format LangChain understands
-_executed_steps = []
 
 def generate_standalone_script(filename: str = "standalone_automation.py") -> str:
     """Generates a standalone python script that replicates the successful steps taken so far."""
@@ -209,10 +345,16 @@ def generate_standalone_script(filename: str = "standalone_automation.py") -> st
         
     try:
         with open(filename, "w", encoding="utf-8") as f:
-            f.write("import time\nimport subprocess\nimport pyautogui\nimport easyocr\nimport os\nfrom PIL import Image\n\n")
+            f.write("import time\nimport subprocess\nimport pyautogui\nimport easyocr\nimport os\nimport shutil\nfrom PIL import Image\n\n")
             f.write(f"TARGET_WINDOW_TITLE = {repr(TARGET_WINDOW_TITLE)}\n")
             f.write(f"AGENT_BASE_RESOLUTION = {repr(AGENT_BASE_RESOLUTION)}\n\n")
             f.write(inspect.getsource(get_target_window_region) + "\n\n")
+            
+            # Write host helpers so they are available in standalone
+            f.write(inspect.getsource(host_size) + "\n\n")
+            f.write(inspect.getsource(host_screenshot) + "\n\n")
+            f.write(inspect.getsource(host_click) + "\n\n")
+            f.write(inspect.getsource(host_swipe) + "\n\n")
             
             # Add the tool definitions (so it is truly standalone)
             used_funcs = []
@@ -248,10 +390,7 @@ def validate_screen(query: str) -> str:
     print(" AGENT ACTION: Taking screenshot for visual validation...")
     screenshot_path = "validation_snap.png"
     region = get_target_window_region()
-    if region:
-        pyautogui.screenshot(screenshot_path, region=region)
-    else:
-        pyautogui.screenshot(screenshot_path)
+    host_screenshot(screenshot_path, region=region)
     return f"__IMAGE_VALIDATION_REQUESTED__:{query}"
 
 available_tools = [install_apk_from_parent, start_test_activity, click_ui_text, wait_for_ui, generate_standalone_script, validate_screen, click_icon_by_coordinate, swipe_screen]
