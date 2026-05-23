@@ -32,7 +32,7 @@ UI_Automation_agent/
 
 - **`agentic_automation/llm_ollama.py`**: LLM interface module for initializing and configuring the ChatOllama instance, binding tools, and managing connections to the Ollama server.
 
-- **`static_automation/testing.sh`**: Bash script providing a fixed automation workflow that finds and installs APK files, launches the NavUiAct app, and navigates through Home, Favorites, and Profile tabs using EasyOCR for text detection.
+- **`static_automation/testing.sh`**: Bash script providing a fixed automation workflow that finds and installs APK files, launches the NavUiAct app, and navigates through the main navigation tabs using EasyOCR for text detection.
 
 ## Prerequisites
 
@@ -143,7 +143,7 @@ bash static_automation/testing.sh
 **Workflow:**
 1. Locates and installs APK from project parent directory
 2. Launches the NavUiAct app
-3. Navigates through Home, Favorites, and Profile tabs
+3. Navigates through the three bottom tabs
 4. Uses EasyOCR to find and click navigation items
 
 ## How It Works
@@ -175,6 +175,39 @@ bash static_automation/testing.sh
 | Ollama connection error | Verify Ollama is running (`ollama serve`), check localhost:11434 is accessible |
 | Model not found error | Pull the model: `ollama pull gpt-oss:120b-cloud` |
 | Permission denied (testing.sh) | Make file executable: `chmod +x static_automation/testing.sh` |
+
+## Wayland Support & Host Interaction
+
+On modern Ubuntu systems running **Wayland**, default screen capturing (`pyautogui.screenshot`) and mouse simulation (`pyautogui.click`) are heavily restricted by system security policies. 
+
+To run this host-level automation framework under Wayland, choose one of the two solutions below:
+
+### Option 1: XWayland Compatibility Mode (Recommended, Easy & Setup-free)
+Simply force your Android Emulator to run in standard X11 compatibility mode. Since both the emulator and the python script will communicate in the XWayland layer, standard clicks and screenshots will work flawlessly without root or system packages!
+
+Start your emulator with:
+```bash
+QT_QPA_PLATFORM=xcb emulator -avd <your_avd_name>
+```
+
+### Option 2: Native Wayland with Kernel-level mouse simulation (`ydotool`)
+If you want to run the emulator and everything natively on Wayland:
+1. **Install ydotool**:
+   ```bash
+   sudo apt install ydotool
+   ```
+2. **Grant User Permissions to `/dev/uinput`**:
+   `ydotool` simulates real input devices at the Linux kernel level. To allow running it without `sudo`:
+   ```bash
+   sudo usermod -aG input $USER
+   ```
+   *Note: You must log out and log back in (or restart your machine) for group permissions to take effect.*
+3. **Start the ydotool daemon**:
+   ```bash
+   ydotoold
+   ```
+
+Our updated scripts automatically detect when you are on a Wayland session and will transparently fallback to `pyscreenshot` for display capture and `ydotool` for clicks/swipes.
 
 ## Configuration
 

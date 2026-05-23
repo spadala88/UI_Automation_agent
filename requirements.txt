@@ -1,5 +1,6 @@
 # UI Automation and Interaction
 pyautogui
+pyscreenshot
 # Computer Vision and OCR
 easyocr
 opencv-python
